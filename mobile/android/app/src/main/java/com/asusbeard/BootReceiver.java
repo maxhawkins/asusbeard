@@ -1,4 +1,4 @@
-package com.asus;
+package com.asusbeard;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

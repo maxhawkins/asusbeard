@@ -1,4 +1,4 @@
-rootProject.name = 'ASUS'
+rootProject.name = 'asusbeard'
 
 include ':app'
 

@@ -1,4 +1,4 @@
-package com.asus;
+package com.asusbeard;
 
 import android.app.Application;
 import android.content.Context;
