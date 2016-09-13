@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+	<head></head>
+	<body>
+		<script src="adapter.js"></script>
+		<script>
+
+function Janus(addr) {
+	this.ws = new WebSocket(addr, 'janus-protocol');
+	this.ws.onmessage = this._onmessage.bind(this);
+	this.ws.onerror = this._onerror.bind(this);
+
+	this.openTxns = {};
+}
+
+Janus.prototype._onerror = function(e) {
+	console.error(e)
+}
+
+Janus.prototype.send = function(msg) {
+	var that = this;
+	return new Promise(function(resolve, reject) {
+		msg.transaction = '' + Object.keys(that.openTxns).length;
+		that.openTxns[msg.transaction] = {
+			msg: msg,
+			resolve: resolve,
+			reject: reject,
+		}
+
+		that.ws.send(JSON.stringify(msg));
+	});
+};
+
+
+Janus.prototype._onmessage = function(e) {
+	var msg = JSON.parse(e.data);
+	
+	var txn = this.openTxns[msg.transaction];
+	delete this.openTxns[msg.transaction];
+
+	if (txn) {
+		txn.resolve(msg);
+	} else {
+		console.log('no txn', msg);
+	}
+}
+
+function RecordSession() {
+	this.sessionID = null
+	this.handleID = null;
+	this.keepaliveInterval = null;
+	this.janus = null;
+}
+
+RecordSession.prototype._keepalive = function() {
+	this.janus.send({
+		janus: "keepalive",
+		session_id: this.sessionID,
+	});
+}
+
+RecordSession.prototype.init = function(janus, jsep) {
+	this.janus = janus;
+	var that = this;
+
+	return janus.send({
+		janus: "create",
+	})
+	.then(function(resp) {
+		if (resp.error) {
+			return Promise.reject(resp.error);
+		}
+		that.sessionID = resp.data.id;
+		that.keepaliveInterval = setInterval(that._keepalive.bind(that), 10000);
+	})
+	.then(function() {
+		return janus.send({
+			janus: "attach",
+			plugin: "janus.plugin.recordplay",
+			session_id: that.sessionID,
+		})
+	})
+	.then(function(resp) {
+		if (resp.error) {
+			return Promise.reject(resp.error);
+		}
+		that.handleID = resp.data.id;
+
+		var pluginMsg = {
+			request: "record",
+			name: (new Date()).toString(),
+		};
+
+		return janus.send({
+			janus: "message",
+			session_id: that.sessionID,
+			handle_id: that.handleID,
+			body: pluginMsg,
+			jsep: jsep,
+		});
+	})
+	.then(function(resp) {
+		if (resp.error) {
+			return Promise.reject(resp.error);
+		}
+	});
+};
+
+RecordSession.prototype.stop = function() {
+	if (this.keepalive) {
+		clearInterval(this.keepalive);
+	}
+}
+
+var pcOpts = {
+	iceServers: [
+		{urls: ["stun:stun.l.google.com:19302"]}
+	],
+}
+
+navigator.mediaDevices.getUserMedia({audio: true, video: true})
+.then(function(stream) {
+	var pc = new RTCPeerConnection(pcOpts);
+	// pc.onicecandidate = function(ev) {
+	// 	var candidate = ev.candidate;
+	// 	if (candidate === null) {
+	// 		candidate = {completed: true};
+	// 	}
+
+	// 	var msg = JSON.stringify({
+	// 		action: "candidate",
+	// 		candidate: candidate,
+	// 	});
+	// 	ws.send(msg);
+	// };
+
+	pc.addStream(stream);
+
+	var janus = new Janus('ws://192.168.99.100:8188');
+	var sess = new RecordSession();
+	janus.ws.onopen = function() {
+		var offer_;
+
+		pc.createOffer({})
+		.then(function(offer) {
+			offer_ = offer;
+			return pc.setLocalDescription(offer)
+		})
+		.then(function() {
+			return sess.init(janus, offer_);
+		})
+		.then(function() {
+			console.log('okkkk');
+		});
+	}
+
+})
+
+		</script>
+	</body>
+</html>
